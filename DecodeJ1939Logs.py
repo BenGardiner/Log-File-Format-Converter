@@ -1,6 +1,4 @@
 #!/bin/env/python
-# 
-
 
 program_title = "NMFTA CAN Data Analyzer"
 program_version = "0.1beta"
@@ -16,13 +14,12 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE OR HARDWARE.
 '''
+import ut_j1939db
 import pandas as pd
 import numpy as np
 
 import sys
-import os
 import struct
-import time
 import json
 
 from PyQt5.QtWidgets import (QMainWindow,
@@ -63,8 +60,6 @@ from graphing import * #this is a custom class file for graphics
 
 rcParams.update({'figure.autolayout': True}) #Depends of matplotlib from graphing
 
-
-      
 class CANDecoderMainWindow(QMainWindow):
 
     def __init__(self):
@@ -79,14 +74,11 @@ class CANDecoderMainWindow(QMainWindow):
         self.init_ui()
 
         #load the J1939 Database
-        with open("J1939db.json",'r') as j1939_file:
-            self.j1939db = json.load(j1939_file)
+        ut_j1939db.init_j1939db()
 
         #load an example file
         self.data_file_name = "example.bin"
         self.load_binary()
-
-
 
     def init_ui(self):
         #Builds Graphical User Interface (GUI)
@@ -320,7 +312,7 @@ class CANDecoderMainWindow(QMainWindow):
                             first_time = False
                         DLC = (timeMicrosecondsAndDLC & 0xFF000000) >> 24
                         ID = struct.unpack("<L",record[9:13])[0]
-                        (PGN,DA,SA) = self.parse_j1939_id(ID)
+                        (PGN,DA,SA) = ut_j1939db.parse_j1939_id(ID)
                         message_bytes = record[17:25]
 
                         if startTime == None:
@@ -345,10 +337,10 @@ class CANDecoderMainWindow(QMainWindow):
                             first_time = False
                         DLC = (timeMicrosecondsAndDLC & 0xFF000000) >> 24
                         ID = struct.unpack("<L",record[12:16])[0]
-                        (PGN,DA,SA) = self.parse_j1939_id(ID)
+                        (PGN,DA,SA) = ut_j1939db.parse_j1939_id(ID)
                         message_bytes = record[16:24]
 
-                        if startTime == None:
+                        if startTime is None:
                             startTime=timeSeconds + timeMicroseconds * 0.000001
                         delta_time = real_time - previous_time
                         previous_time = real_time
@@ -420,101 +412,6 @@ class CANDecoderMainWindow(QMainWindow):
         self.graph_canvas.xlabel("Time (sec)")
         self.graph_canvas.ylabel("Value")
 
-    def parse_j1939_id(self, can_id):
-        SA = (0x000000FF & can_id)
-        PF = (0x00FF0000 & can_id) >> 16
-        DA = (0x0000FF00 & can_id) >> 8
-
-        if PF >= 240: #PDU2 format
-            PGN = PF*256+DA
-            DA = 0xFF
-        else:
-            PGN = PF*256
-        return (PGN,DA,SA)
-
-    def get_pgn_acronym(self, pgn):
-        try:
-            return self.j1939db["J1939PGNdb"]["{}".format(pgn)]["Label"]
-        except KeyError:
-            return "Unknown"
-
-    def get_spn_list(self, pgn):
-        try:
-            return sorted(self.j1939db["J1939PGNdb"]["{}".format(pgn)]["SPNs"])
-        except KeyError:
-            return []
-
-    def get_spn_name(self, spn):
-        return self.j1939db["J1939SPNdb"]["{}".format(spn)]["Name"]
-
-    def lookup_all_spn_params(self, callback, spn):
-        die = False
-        # look up items in the database
-        name = self.get_spn_name(spn)
-        units = self.j1939db["J1939SPNdb"]["{}".format(spn)]["Units"]
-        spn_start = self.j1939db["J1939SPNdb"]["{}".format(spn)]["StartBit"]
-        spn_end = self.j1939db["J1939SPNdb"]["{}".format(spn)]["EndBit"]
-        spn_length = self.j1939db["J1939SPNdb"]["{}".format(spn)]["SPNLength"]
-        scale = self.j1939db["J1939SPNdb"]["{}".format(spn)]["Resolution"]
-        offset = self.j1939db["J1939SPNdb"]["{}".format(spn)]["Offset"]
-        if spn_length <= 8:
-            fmt = "B"
-            rev_fmt = "B"
-        elif spn_length <= 16:
-            fmt = ">H"
-            rev_fmt = "<H"
-        elif spn_length <= 32:
-            fmt = ">L"
-            rev_fmt = "<L"
-        elif spn_length <= 64:
-            fmt = ">Q"
-            rev_fmt = "<Q"
-        else:
-            die = True
-            if not callback is None:
-                callback("Not a plottable SPN.")
-        shift = 64 - spn_start - spn_length
-        mask = 0
-        for m in range(spn_length):
-            mask += 1 << (63 - m - spn_start)
-            # print("Mask: 0x{:016X}".format(mask))
-        if scale <= 0:
-            scale = 1
-        return die, fmt, mask, name, offset, rev_fmt, scale, shift, spn_end, spn_length, spn_start, units
-
-    def get_spn_value(self, frame_bytes, fmt, mask, offset, rev_fmt, scale, shift):
-        # print(entry)
-        # times.append(entry[0])
-        # print("Entry: " + "".join("{:02X} ".format(d) for d in entry[1]))
-        decimal_value = struct.unpack(">Q", frame_bytes)[0] & mask
-        # the < takes care of reverse byte orders
-        # print("masked decimal_value: {:08X}".format(decimal_value ))
-        shifted_decimal = decimal_value >> shift
-        # reverse the byte order
-        reversed_decimal = struct.unpack(fmt, struct.pack(rev_fmt, shifted_decimal))[0]
-        # print("shifted_decimal: {:08X}".format(shifted_decimal))
-        spn_value = reversed_decimal * scale + offset
-        return spn_value
-
-    def get_address_name(self, address):
-        try:
-            address = "{:3d}".format(address)
-            return self.j1939db["J1939SATabledb"][address.strip()]
-        except KeyError:
-            return "Unknown"
-
-    def get_formatted_address_and_name(self, address):
-        if address == 255:
-            formatted_address = "(255)"
-            address_name = "All"
-        else:
-            formatted_address = "{:3d}".format(address)
-            try:
-                address_name = self.get_address_name(address)
-            except KeyError:
-                address_name = "Unknown"
-        return formatted_address, address_name
-
     def load_can_id_table(self):
         loading_progress = QProgressDialog(self)
         loading_progress.setMinimumWidth(300)
@@ -543,6 +440,7 @@ class CANDecoderMainWindow(QMainWindow):
 
             if loading_progress.wasCanceled():
                 break
+
             #Get the pandas data frame for each unique ID
             df = self.CAN_groups.get_group(unique_id)
 
@@ -552,17 +450,16 @@ class CANDecoderMainWindow(QMainWindow):
             else:
                 period = 0
 
-            (PGN,DA,SA) = self.parse_j1939_id(unique_id)
-            formatted_DA, DA_name = self.get_formatted_address_and_name(DA)
-            formatted_SA, SA_name = self.get_formatted_address_and_name(SA)
+            (PGN,DA,SA) = ut_j1939db.parse_j1939_id(unique_id)
+            formatted_da, da_name = ut_j1939db.get_formatted_address_and_name(DA)
+            formatted_sa, sa_name = ut_j1939db.get_formatted_address_and_name(SA)
 
             if period > 0:
                 frequency = 1000/period
             else:
                 frequency = 0
 
-            acronym = self.get_pgn_acronym(PGN)
-            SPNs = self.get_spn_list(PGN)
+            acronym = ut_j1939db.get_pgn_acronym(PGN)
 
             row = self.can_id_table.rowCount()
             loading_progress.setValue(row+1)
@@ -570,10 +467,10 @@ class CANDecoderMainWindow(QMainWindow):
             row_values = ["{:08X}".format(unique_id),
                           "{:8d}".format(PGN),
                           str(acronym),
-                          str(formatted_DA),
-                          #DA_name,
-                          str(formatted_SA),
-                          str(SA_name),
+                          str(formatted_da),
+                          #da_name,
+                          str(formatted_sa),
+                          str(sa_name),
                           "{:12d}".format(count),
                           "{:5d}".format(int(period)) ,
                           "{:9.3f}".format(frequency)]
@@ -600,7 +497,7 @@ class CANDecoderMainWindow(QMainWindow):
             callback = self.statusBar().showMessage
 
             die, fmt, mask, name, offset, rev_fmt, scale, shift, spn_end, spn_length, spn_start, units = \
-                self.lookup_all_spn_params(callback, spn)
+                ut_j1939db.lookup_all_spn_params(callback, spn)
             if die:
                 return
 
@@ -610,13 +507,12 @@ class CANDecoderMainWindow(QMainWindow):
             self.info_box_layout.addWidget(QLabel("  Start Bit: {}, End Bit: {}".format(spn_start,spn_end)))
             self.info_box_layout.addWidget(QLabel("  Mask: 0x{:016X}".format(mask)))
 
-            times = []
             values = []
             df = self.CAN_groups.get_group(id_key)
             times = df["Rel. Time"]
 
             for theBytes in df["Bytes"]:
-                spn_value = self.get_spn_value(theBytes, fmt, mask, offset, rev_fmt, scale, shift)
+                spn_value = ut_j1939db.get_spn_value(theBytes, fmt, mask, offset, rev_fmt, scale, shift)
                 #print("SPN value: {}\n".format(spn_value))
                 values.append(spn_value)
 
@@ -671,17 +567,15 @@ class CANDecoderMainWindow(QMainWindow):
         self.message_selection = self.message_dataframe.loc[self.message_dataframe['ID'].isin(id_keys)]
         self.load_message_table(self.message_selection)
 
-
         self.spn_plot_checkbox={}
 
         for id_key in id_keys:
             #we need to look up the PGN that was put into the ID_dict. The key was the ID as an integer
-
-            (PGN,DA,SA) = self.parse_j1939_id(id_key)
+            (PGN,DA,SA) = ut_j1939db.parse_j1939_id(id_key)
             #selected_data_frames.append(self.CAN_groups.get_group(id_key))
             try:
-                for spn in self.get_spn_list(PGN):
-                    spn_name = self.get_spn_name(spn)
+                for spn in ut_j1939db.get_spn_list(PGN):
+                    spn_name = ut_j1939db.get_spn_name(spn)
                     self.spn_list.append(spn)
                     self.spn_plot_checkbox[spn]= QCheckBox("Plot SPN {}: {}".format(spn,spn_name),self)
                     self.spn_plot_checkbox[spn].stateChanged.connect(partial(self.plot_SPN,spn,id_key)) #We need to pass the SPN to the plotter
@@ -693,35 +587,33 @@ class CANDecoderMainWindow(QMainWindow):
         self.control_scroll_area.setWidget(self.control_box)
 
     def find_transport_pgns(self):
-
         loading_progress = QProgressDialog(self)
         loading_progress.setMinimumWidth(300)
         loading_progress.setWindowTitle("Finding J1939 Transport Protocol Messages")
         loading_progress.setMinimumDuration(0)
         loading_progress.setWindowModality(Qt.ApplicationModal)
 
-
         self.id_selection_list = []
         #self.message_dataframe["ID"].value_counts().index
-        for trial_id in self.message_dataframe["ID"].value_counts().index:
-            #print("{:08X}".format(trial_id & 0x00FF0000))
-            if (trial_id & 0x00FF0000) == 0x00EC0000:
-                self.id_selection_list.append(trial_id)
-            if (trial_id & 0x00FF0000) == 0x00EB0000:
-                self.id_selection_list.append(trial_id)
+        for message_id in self.message_dataframe["ID"].value_counts().index:
+            #print("{:08X}".format(message_id & 0x00FF0000))
+            if ut_j1939db.is_transport_message(message_id):
+                self.id_selection_list.append(message_id)
+
         print(self.id_selection_list)
         df = self.message_dataframe.loc[self.message_dataframe['ID'].isin(self.id_selection_list)]
         print(df.head())
         self.load_message_table(df)
 
-        #Load the data
-        filled_rows = 0
-        self.BAMs = {}
-        new_pgn = {}
-        new_data = {}
-        new_packets = {}
-        new_length = {}
-        BAM_byte_counter = 0
+        all_bams = {}
+        def process_bam_found(data_bytes, sa, pgn, timestamp):
+            if sa in all_bams.keys():
+                all_bams[sa].append((timestamp, data_bytes, pgn))
+            else:
+                all_bams[sa] = [(timestamp, data_bytes, pgn)]
+
+        bam_processor = ut_j1939db.get_bam_processor(process_bam_found)
+
         row=0
         loading_progress.setMaximum(len(df))
         for index,line in df.iterrows():
@@ -729,33 +621,13 @@ class CANDecoderMainWindow(QMainWindow):
             loading_progress.setValue(row)
             if loading_progress.wasCanceled():
                 break
-            trial_id = line["ID"]
+
+            message_id = line["ID"]
             sa = line["SA"]
-            if (trial_id & 0x00FF0000) == 0x00EC0000: #connection management message
-                message = line["Bytes"]
+            message_bytes = line["Bytes"]
+            timestamp = line["Abs. Time"]
 
-                if message[0] == 32: #BAM,CTS
-                    new_pgn[sa] = (message[7] << 16) + (message[6] << 8) + message[5]
-                    new_length[sa] = (message[2] << 8) + message[1]
-                    new_packets[sa] = message[3]
-                    new_data[sa] = [0xFF for i in range(7*new_packets[sa])]
-
-            elif (trial_id & 0x00FF0000) == 0x00EB0000: # Data Transfer
-                message = line["Bytes"]
-                #print("{:08X}".format(trial_id) + "".join(" {:02X}".format(d) for d in message))
-                if sa in new_data.keys():
-                    for b,i in zip(message[1:],range(7)):
-                        try:
-                            new_data[sa][i+7*(message[0]-1)] = b
-                        except Exception as e:
-                            print (e)
-                    if message[0] == new_packets[sa]:
-                        data_bytes = bytes(new_data[sa][0:new_length[sa]])
-                        if sa in self.BAMs.keys():
-                            self.BAMs[sa].append( (line["Abs. Time"],data_bytes,new_pgn[sa]) )
-                        else:
-                            self.BAMs[sa]= [ (line["Abs. Time"],data_bytes,new_pgn[sa]) ]
-
+            bam_processor(message_bytes, message_id, sa, timestamp)
 
         #Set the headers
         self.transport_layer_table_columns = ["PGN","Acronym","SA","Data"]
@@ -763,26 +635,26 @@ class CANDecoderMainWindow(QMainWindow):
         self.transport_layer_table.setHorizontalHeaderLabels(self.transport_layer_table_columns)
         #self.transport_layer_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.transport_layer_table.clearContents()
+
         display = {}
-        for key,item in sorted(self.BAMs.items()):
-            SA_entry = "{:3d}".format(key)
-            for entry in item:
-                PGN_entry = "{:8d}".format(entry[2])
-                try:
-                    acronym = self.get_pgn_acronym(entry[2])
-                except KeyError:
-                   acronym = "Unknown"
-                data = entry[1].decode("ascii","backslashreplace")
-                display[PGN_entry+SA_entry]=[PGN_entry,acronym,SA_entry,data]
+        for sa,timestamp_pgn_and_data_list in sorted(all_bams.items()):
+            formatted_sa = "{:3d}".format(sa)
+            for timestamp_pgn_and_data in timestamp_pgn_and_data_list:
+                formatted_pgn = "{:8d}".format(timestamp_pgn_and_data[2])
+                pgn_acronym = ut_j1939db.get_pgn_acronym(timestamp_pgn_and_data[2])
+
+                data = timestamp_pgn_and_data[1].decode("ascii","backslashreplace")
+
+                display[formatted_pgn + formatted_sa]=[formatted_pgn, pgn_acronym, formatted_sa, data]
 
         self.transport_layer_table.setRowCount(0)
         for row_values in sorted(display.values()):
                 row = self.transport_layer_table.rowCount()
                 self.transport_layer_table.insertRow(row)
                 for col in range(self.transport_layer_table.columnCount()):
-                    entry = QTableWidgetItem(row_values[col])
-                    entry.setFlags(entry.flags() & ~Qt.ItemIsEditable)
-                    self.transport_layer_table.setItem(row,col,entry)
+                    timestamp_pgn_and_data = QTableWidgetItem(row_values[col])
+                    timestamp_pgn_and_data.setFlags(timestamp_pgn_and_data.flags() & ~Qt.ItemIsEditable)
+                    self.transport_layer_table.setItem(row,col,timestamp_pgn_and_data)
 
         self.transport_layer_table.resizeColumnsToContents()
         self.transport_layer_table.setSortingEnabled(True)
