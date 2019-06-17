@@ -1,5 +1,7 @@
 import struct
+import sys
 import json
+import bitstring
 
 DA_MASK = 0x0000FF00
 SA_MASK = 0x000000FF
@@ -46,9 +48,23 @@ def is_bam_cts_message(message_bytes):
 def get_pgn_acronym(pgn):
     global j1939db
     try:
-        return j1939db["J1939PGNdb"]["{}".format(pgn)]["Label"]
+        acronym = j1939db["J1939PGNdb"]["{}".format(pgn)]["Label"]
+        if acronym == '':
+            acronym = "Unknown"
+        return acronym
     except KeyError:
         return "Unknown"
+
+
+def get_pgn_name(pgn):
+    global j1939db
+    try:
+        name = j1939db["J1939PGNdb"]["{}".format(pgn)]["Name"]
+        if name == '':
+            name = get_pgn_acronym(pgn)
+        return name
+    except KeyError:
+        return get_pgn_acronym(pgn)
 
 
 def get_spn_list(pgn):
@@ -67,6 +83,14 @@ def get_spn_name(spn):
         return "Unknown"
 
 
+def get_spn_acronym(spn):
+    global j1939db
+    try:
+        return j1939db["J1939SPNdb"]["{}".format(spn)]["Acronym"]
+    except KeyError:
+        return "Unknown"
+
+
 def get_address_name(address):
     global j1939db
     try:
@@ -81,12 +105,27 @@ def get_formatted_address_and_name(address):
         formatted_address = "(255)"
         address_name = "All"
     else:
-        formatted_address = "{:3d}".format(address)
+        formatted_address = "({:3d})".format(address)
         try:
             address_name = get_address_name(address)
         except KeyError:
             address_name = "Unknown"
     return formatted_address, address_name
+
+
+def describe_message_id(message_id):
+    description = {}
+
+    pgn, da, sa = parse_j1939_id(message_id)
+    pgn_acronym = get_pgn_acronym(pgn)
+    pgn_name = get_pgn_name(pgn)
+    da_formatted_address, da_address_name = get_formatted_address_and_name(da)
+    sa_formatted_address, sa_address_name = get_formatted_address_and_name(sa)
+
+    description['PGN'] = "%s(%s)" % (pgn_acronym, pgn)
+    description['DA'] = "%s%s" % (da_address_name, da_formatted_address)
+    description['SA'] = "%s%s" % (sa_address_name, sa_address_name)
+    return description
 
 
 def lookup_all_spn_params(callback, spn):
@@ -121,7 +160,7 @@ def lookup_all_spn_params(callback, spn):
             callback("Not a plottable SPN.")
     shift = 64 - spn_start - spn_length
     mask = 0
-    for m in range(spn_length):
+    for m in range(min(spn_length, 63)):
         mask += 1 << (63 - m - spn_start)
         # print("Mask: 0x{:016X}".format(mask))
     if scale <= 0:
@@ -129,7 +168,21 @@ def lookup_all_spn_params(callback, spn):
     return die, fmt, mask, name, offset, rev_fmt, scale, shift, spn_end, spn_length, spn_start, units
 
 
-def get_spn_value(frame_bytes, fmt, mask, offset, rev_fmt, scale, shift):
+def get_spn_value(message_data, spn):
+    spn_start = j1939db["J1939SPNdb"]["{}".format(spn)]["StartBit"]
+    spn_end = j1939db["J1939SPNdb"]["{}".format(spn)]["EndBit"]
+    scale = j1939db["J1939SPNdb"]["{}".format(spn)]["Resolution"]
+    if scale <= 0:
+        scale = 1
+    offset = j1939db["J1939SPNdb"]["{}".format(spn)]["Offset"]
+
+    cut_data = bitstring.BitString(message_data)[spn_start : spn_end + 1]
+    cut_data.byteswap()
+
+    return cut_data.uint * scale + offset
+
+
+def get_spn_value_alt(frame_bytes, fmt, mask, offset, rev_fmt, scale, shift):
     # print(entry)
     # times.append(entry[0])
     # print("Entry: " + "".join("{:02X} ".format(d) for d in entry[1]))
@@ -142,6 +195,38 @@ def get_spn_value(frame_bytes, fmt, mask, offset, rev_fmt, scale, shift):
     # print("shifted_decimal: {:08X}".format(shifted_decimal))
     spn_value = reversed_decimal * scale + offset
     return spn_value
+
+
+def describe_message_data(message_id, message_data):
+    pgn, da, sa = parse_j1939_id(message_id)
+
+    description = dict()
+    for spn in get_spn_list(pgn):
+        spn_name = get_spn_name(spn)
+        spn_units = j1939db["J1939SPNdb"]["{}".format(spn)]["Units"]
+
+        try:
+            die, fmt, mask, name, offset, rev_fmt, scale, shift, spn_end, spn_length, spn_start, units = \
+                lookup_all_spn_params(None, spn)
+            alt_spn_value = get_spn_value_alt(message_data, fmt, mask, offset, rev_fmt, scale, shift)
+        except ValueError:
+            continue
+
+        spn_value = get_spn_value(message_data, spn)
+        description[spn_name] = "%s (%s)" % (spn_value, spn_units)
+        if spn_units == "bit":
+            try:
+                enum_descriptions = j1939db["J1939BitDecodings"]["{}".format(spn)]
+                spn_value_description = enum_descriptions[str(int(spn_value))].strip()
+                description[spn_name] = "%d (%s)" % (spn_value, spn_value_description)
+            except KeyError:
+                description[spn_name] = "%d (Unknown)" % spn_value
+
+
+        if spn_value != alt_spn_value:
+            print("%s vs %s" % (spn_value, alt_spn_value), file=sys.stderr)
+
+    return description
 
 
 def get_bam_processor(process_bam_found):

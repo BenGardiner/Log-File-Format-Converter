@@ -512,7 +512,7 @@ class CANDecoderMainWindow(QMainWindow):
             times = df["Rel. Time"]
 
             for theBytes in df["Bytes"]:
-                spn_value = ut_j1939db.get_spn_value(theBytes, fmt, mask, offset, rev_fmt, scale, shift)
+                spn_value = ut_j1939db.get_spn_value(theBytes, spn)
                 #print("SPN value: {}\n".format(spn_value))
                 values.append(spn_value)
 
