@@ -22,19 +22,15 @@ parser.add_argument('--format',  type=str2bool, const=True, default=False, nargs
 args = parser.parse_args()
 
 with open(args.candump, 'r') as f:
-    for line in f.readlines():
+    for candump_line in f.readlines():
         try:
-            message_id = bitstring.BitString(hex=line.split(' ')[2].split('#')[0])
-            message_data = bitstring.BitString(hex=line.split(' ')[2].split('#')[1])
+            message_id = bitstring.BitString(hex=candump_line.split(' ')[2].split('#')[0])
+            message_data = bitstring.BitString(hex=candump_line.split(' ')[2].split('#')[1])
 
         except IndexError:
             continue
 
         desc_line = ''
-        if args.candata:
-            desc_line = desc_line + line.rstrip() + " ; "
-            if args.format:
-                desc_line = desc_line + '\n'
 
         if args.pgn:
             pgn_desc = ut_j1939db.describe_message_id(message_id.uint)
@@ -59,5 +55,18 @@ with open(args.candump, 'r') as f:
                 spn_desc = str(spn_desc)
 
             desc_line = desc_line + spn_desc
+
+        if args.candata:
+            can_line = candump_line.rstrip() + " ; "
+            if not args.format:
+                desc_line = can_line + desc_line
+            else:
+                formatted_lines = desc_line.splitlines()
+                first_line = formatted_lines[0]
+                desc_line = can_line + first_line + '\n'
+                formatted_lines.remove(first_line)
+
+                for line in formatted_lines:
+                    desc_line = desc_line + ' '*len(candump_line) + "; " + line + '\n'
 
         print(desc_line)
