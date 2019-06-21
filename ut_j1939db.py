@@ -168,17 +168,23 @@ def lookup_all_spn_params(callback, spn):
     return die, fmt, mask, name, offset, rev_fmt, scale, shift, spn_end, spn_length, spn_start, units
 
 
-def get_spn_value(message_data, spn):
+def get_spn_bytes(message_data, spn):
     spn_start = j1939db["J1939SPNdb"]["{}".format(spn)]["StartBit"]
     spn_end = j1939db["J1939SPNdb"]["{}".format(spn)]["EndBit"]
+
+    cut_data = bitstring.BitString(message_data)[spn_start : spn_end + 1]
+    cut_data.byteswap()
+
+    return cut_data
+
+
+def get_spn_value(message_data, spn):
     scale = j1939db["J1939SPNdb"]["{}".format(spn)]["Resolution"]
     if scale <= 0:
         scale = 1
     offset = j1939db["J1939SPNdb"]["{}".format(spn)]["Offset"]
 
-    cut_data = bitstring.BitString(message_data)[spn_start : spn_end + 1]
-    cut_data.byteswap()
-
+    cut_data = get_spn_bytes(message_data, spn)
     return cut_data.uint * scale + offset
 
 
@@ -205,13 +211,6 @@ def describe_message_data(message_id, message_data):
         spn_name = get_spn_name(spn)
         spn_units = j1939db["J1939SPNdb"]["{}".format(spn)]["Units"]
 
-        try:
-            die, fmt, mask, name, offset, rev_fmt, scale, shift, spn_end, spn_length, spn_start, units = \
-                lookup_all_spn_params(None, spn)
-            alt_spn_value = get_spn_value_alt(message_data, fmt, mask, offset, rev_fmt, scale, shift)
-        except ValueError:
-            continue
-
         spn_value = get_spn_value(message_data, spn)
         description[spn_name] = "%s (%s)" % (spn_value, spn_units)
         if spn_units == "bit":
@@ -221,10 +220,8 @@ def describe_message_data(message_id, message_data):
                 description[spn_name] = "%d (%s)" % (spn_value, spn_value_description)
             except KeyError:
                 description[spn_name] = "%d (Unknown)" % spn_value
-
-
-        if spn_value != alt_spn_value:
-            print("%s vs %s" % (spn_value, alt_spn_value), file=sys.stderr)
+        elif spn_units == "Manufacturer Determined":
+            description[spn_name] = "%s" % get_spn_bytes(message_data, spn)
 
     return description
 
