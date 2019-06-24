@@ -512,9 +512,12 @@ class CANDecoderMainWindow(QMainWindow):
             times = df["Rel. Time"]
 
             for theBytes in df["Bytes"]:
-                spn_value = ut_j1939db.get_spn_value(theBytes, spn)
-                #print("SPN value: {}\n".format(spn_value))
-                values.append(spn_value)
+                try:
+                    spn_value = ut_j1939db.get_spn_value(theBytes, spn)
+                    #print("SPN value: {}\n".format(spn_value))
+                    values.append(spn_value)
+                except ValueError:
+                    pass
 
             #Plot the data
             self.graph_canvas.plot_data(times,values,"SPN {}".format(spn))

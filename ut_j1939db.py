@@ -180,12 +180,18 @@ def get_spn_bytes(message_data, spn):
 
 def get_spn_value(message_data, spn):
     scale = j1939db["J1939SPNdb"]["{}".format(spn)]["Resolution"]
+    operational_min = j1939db["J1939SPNdb"]["{}".format(spn)]["OperationalLow"]
+    operational_max = j1939db["J1939SPNdb"]["{}".format(spn)]["OperationalHigh"]
+
     if scale <= 0:
         scale = 1
     offset = j1939db["J1939SPNdb"]["{}".format(spn)]["Offset"]
 
     cut_data = get_spn_bytes(message_data, spn)
-    return cut_data.uint * scale + offset
+    value = cut_data.uint * scale + offset
+    if value < operational_min or value > operational_max:
+        raise ValueError
+    return value
 
 
 def get_spn_value_alt(frame_bytes, fmt, mask, offset, rev_fmt, scale, shift):
