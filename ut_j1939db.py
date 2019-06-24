@@ -1,5 +1,3 @@
-import struct
-import sys
 import json
 import bitstring
 
@@ -118,7 +116,6 @@ def describe_message_id(message_id):
 
     pgn, da, sa = parse_j1939_id(message_id)
     pgn_acronym = get_pgn_acronym(pgn)
-    pgn_name = get_pgn_name(pgn)
     da_formatted_address, da_address_name = get_formatted_address_and_name(da)
     sa_formatted_address, sa_address_name = get_formatted_address_and_name(sa)
 
@@ -172,7 +169,7 @@ def get_spn_bytes(message_data, spn):
     spn_start = j1939db["J1939SPNdb"]["{}".format(spn)]["StartBit"]
     spn_end = j1939db["J1939SPNdb"]["{}".format(spn)]["EndBit"]
 
-    cut_data = bitstring.BitString(message_data)[spn_start : spn_end + 1]
+    cut_data = bitstring.BitString(message_data)[spn_start:spn_end + 1]
     cut_data.byteswap()
 
     return cut_data
@@ -192,21 +189,6 @@ def get_spn_value(message_data, spn):
     if value < operational_min or value > operational_max:
         raise ValueError
     return value
-
-
-def get_spn_value_alt(frame_bytes, fmt, mask, offset, rev_fmt, scale, shift):
-    # print(entry)
-    # times.append(entry[0])
-    # print("Entry: " + "".join("{:02X} ".format(d) for d in entry[1]))
-    decimal_value = struct.unpack(">Q", frame_bytes)[0] & mask
-    # the < takes care of reverse byte orders
-    # print("masked decimal_value: {:08X}".format(decimal_value ))
-    shifted_decimal = decimal_value >> shift
-    # reverse the byte order
-    reversed_decimal = struct.unpack(fmt, struct.pack(rev_fmt, shifted_decimal))[0]
-    # print("shifted_decimal: {:08X}".format(shifted_decimal))
-    spn_value = reversed_decimal * scale + offset
-    return spn_value
 
 
 def describe_message_data(message_id, message_data):
