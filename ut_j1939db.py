@@ -199,21 +199,26 @@ def describe_message_data(message_id, message_data):
         spn_name = get_spn_name(spn)
         spn_units = j1939db["J1939SPNdb"]["{}".format(spn)]["Units"]
 
-        spn_value = get_spn_value(message_data, spn)
-        description[spn_name] = "%s (%s)" % (spn_value, spn_units)
-        if spn_units.lower() in ("bit", "binary",):
-            try:
-                enum_descriptions = j1939db["J1939BitDecodings"]["{}".format(spn)]
-                spn_value_description = enum_descriptions[str(int(spn_value))].strip()
-                description[spn_name] = "%d (%s)" % (spn_value, spn_value_description)
-            except KeyError:
-                description[spn_name] = "%d (Unknown)" % spn_value
-        elif spn_units.lower() in ("manufacturer determined", "byte", ""):
-            description[spn_name] = "%s" % get_spn_bytes(message_data, spn)
-        elif spn_units.lower() in ("request dependent",):
-            description[spn_name] = "%s (%s)" % (get_spn_bytes(message_data, spn), spn_units)
-        elif spn_units.upper() in ("ASCII",):
-            description[spn_name] = "%s" % get_spn_bytes(message_data, spn).tobytes()
+        try:
+            if spn_units.lower() in ("bit", "binary",):
+                spn_value = get_spn_value(message_data, spn)
+                try:
+                    enum_descriptions = j1939db["J1939BitDecodings"]["{}".format(spn)]
+                    spn_value_description = enum_descriptions[str(int(spn_value))].strip()
+                    description[spn_name] = "%d (%s)" % (spn_value, spn_value_description)
+                except KeyError:
+                    description[spn_name] = "%d (Unknown)" % spn_value
+            elif spn_units.lower() in ("manufacturer determined", "byte", ""):
+                description[spn_name] = "%s" % get_spn_bytes(message_data, spn)
+            elif spn_units.lower() in ("request dependent",):
+                description[spn_name] = "%s (%s)" % (get_spn_bytes(message_data, spn), spn_units)
+            elif spn_units.upper() in ("ASCII",):
+                description[spn_name] = "%s" % get_spn_bytes(message_data, spn).tobytes()
+            else:
+                spn_value = get_spn_value(message_data, spn)
+                description[spn_name] = "%s (%s)" % (spn_value, spn_units)
+        except ValueError:
+            description[spn_name] = "%s (%s)" % (get_spn_bytes(message_data, spn), "Out of range")
 
     return description
 
