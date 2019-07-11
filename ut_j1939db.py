@@ -121,7 +121,7 @@ def describe_message_id(message_id):
 
     description['PGN'] = "%s(%s)" % (pgn_acronym, pgn)
     description['DA'] = "%s%s" % (da_address_name, da_formatted_address)
-    description['SA'] = "%s%s" % (sa_address_name, sa_address_name)
+    description['SA'] = "%s%s" % (sa_address_name, sa_formatted_address)
     return description
 
 
