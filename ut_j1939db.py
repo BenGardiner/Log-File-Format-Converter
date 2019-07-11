@@ -218,6 +218,15 @@ def describe_message_data(message_id, message_data):
     return description
 
 
+def describe_data_transfer_complete(message_data, sa, pgn, timestamp):
+    description = dict()
+
+    description['PGN'] = pgn
+    description['data'] = str(bitstring.BitString(message_data))
+
+    return description
+
+
 def get_bam_processor(process_bam_found):
     new_pgn = {}
     new_data = {}

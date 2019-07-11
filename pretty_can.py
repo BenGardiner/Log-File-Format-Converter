@@ -21,11 +21,21 @@ parser.add_argument('--format',  type=str2bool, const=True, default=False, nargs
 
 args = parser.parse_args()
 
+bam_descriptions = list()
+
+
+def process_bam_found(data_bytes, sa, pgn, timestamp):
+    bam_descriptions.append(ut_j1939db.describe_data_transfer_complete(data_bytes, sa, pgn, timestamp))
+
+
+bam_processor = ut_j1939db.get_bam_processor(process_bam_found)
+
 with open(args.candump, 'r') as f:
     for candump_line in f.readlines():
         try:
             message_id = bitstring.BitString(hex=candump_line.split(' ')[2].split('#')[0])
             message_data = bitstring.BitString(hex=candump_line.split(' ')[2].split('#')[1])
+            timestamp = float(candump_line.split(' ')[0].replace('(', '').replace(')', ''))
 
         except IndexError:
             continue
@@ -55,6 +65,22 @@ with open(args.candump, 'r') as f:
                 spn_desc = str(spn_desc)
 
             desc_line = desc_line + spn_desc
+
+            pgn, da, sa = ut_j1939db.parse_j1939_id(message_id.uint)
+            bam_processor(message_data, message_id.uint, sa, timestamp)
+            if len(bam_descriptions) > 0:
+                bam_description = bam_descriptions.pop()
+                if args.format:
+                    bam_description = str(json.dumps(bam_description, indent=4))
+                else:
+                    bam_description = str(bam_description)
+
+                if args.format:
+                    desc_line = desc_line + '\n'
+                else:
+                    desc_line = desc_line + " // "
+
+                desc_line = desc_line + bam_descriptions
 
         if args.candata:
             can_line = candump_line.rstrip() + " ; "
